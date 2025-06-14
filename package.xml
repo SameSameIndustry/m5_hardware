@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>m5_hardware</name>
+  <version>0.1.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="ryoppyy101@gmail.com">ry0py</maintainer>
+  <license>TODO: License declaration</license>
+
+  <!-- ビルドツール -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <!-- cmakeが楽になる -->
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
+
+  <!-- ビルド時および実行時に必要な依存 -->
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>std_msgs</depend>
+  <depend>controller_interface</depend>
+
+
+  <!--テスト用-->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <!-- pluginlib のプラグイン記述ファイルを install する -->
+    <pluginlib plugin="${prefix}/share/${PROJECT_NAME}/hardware_interface/plugin.xml"/>
+  </export>
+</package>
