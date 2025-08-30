@@ -35,32 +35,48 @@ hardware_interface::CallbackReturn M5Hardware::on_configure(
 
 std::vector<hardware_interface::StateInterface> M5Hardware::export_state_interfaces()
 {
-    // TODO ros2 control用のstate_interfaceを露出させる
-    // Export state interfaces
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-    for (size_t i = 0; i < joint_names_.size(); ++i) {
-        // 位置と速度のインターフェースを追加
-        state_interfaces.emplace_back(joint_names_[i], "position", &joint_position_[i]);
-        state_interfaces.emplace_back(joint_names_[i], "velocity", &joint_velocities_[i]);
-        state_interfaces.emplace_back(joint_names_[i], "effort", &joint_effort_[i]);
+    // infoからros2 control.xacroで指定したstate interfaceを取得し、対応する変数を登録していく
+    std::vector<hardware_interface::StateInterface> sis;
+    for (size_t i = 0; i < info_.joints.size(); ++i) {
+        for (const auto &si : info_.joints[i].state_interfaces) {
+        const auto &name = si.name;
+            if (name == "position") {
+                sis.emplace_back(joint_names_[i], name, &joint_position_[i]);
+            } else if (name == "velocity") {
+                sis.emplace_back(joint_names_[i], name, &joint_velocities_[i]);
+            } else if (name == "effort") {
+                sis.emplace_back(joint_names_[i], name, &joint_effort_[i]);
+            } else {
+                RCLCPP_WARN(rclcpp::get_logger("M5Hardware"),
+                            "Unsupported state IF '%s' for joint '%s' (ignored).",
+                            name.c_str(), joint_names_[i].c_str());
+            }
+        }
     }
-
-    return state_interfaces;
+  return sis;
 }
 
 std::vector<hardware_interface::CommandInterface> M5Hardware::export_command_interfaces()
 {
-    // Export command interfaces
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-
-    for (size_t i = 0; i < joint_names_.size(); ++i) {
-        // 位置と速度のインターフェースを追加
-        command_interfaces.emplace_back(joint_names_[i], "position", &joint_position_command_[i]); // joint_position_command_にros2 controlからの値が入る
-        command_interfaces.emplace_back(joint_names_[i], "velocity", &joint_velocities_command_[i]);
-        command_interfaces.emplace_back(joint_names_[i], "effort", &joint_effort_command_[i]);
+    // infoからros2 control.xacroで指定したcommand interfaceを取得し、対応する変数を登録していく
+    std::vector<hardware_interface::CommandInterface> cis;
+    for (size_t i = 0; i < info_.joints.size(); ++i) {
+        for (const auto &ci : info_.joints[i].command_interfaces) {
+            const auto &name = ci.name;
+            if (name == "position") {
+                cis.emplace_back(joint_names_[i], name, &joint_position_command_[i]);
+            } else if (name == "velocity") {
+                cis.emplace_back(joint_names_[i], name, &joint_velocities_command_[i]);
+            } else if (name == "effort") {
+                cis.emplace_back(joint_names_[i], name, &joint_effort_command_[i]);
+            } else {
+                RCLCPP_WARN(rclcpp::get_logger("M5Hardware"),
+                            "Unsupported command IF '%s' for joint '%s' (ignored).",
+                            name.c_str(), joint_names_[i].c_str());
+            }
+        }
     }
-
-    return command_interfaces;
+    return cis;
 }
 
 hardware_interface::return_type M5Hardware::read(
