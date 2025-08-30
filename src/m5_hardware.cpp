@@ -10,16 +10,19 @@ hardware_interface::CallbackReturn M5Hardware::on_init(
     joint_names_.clear();
     joint_position_.clear();
     joint_velocities_.clear();
+    joint_effort_.clear();
     // ハードウェア情報からジョイント名を取得
     for (const auto & joint : info.joints) {
         joint_names_.push_back(joint.name);
     }
     size_t num_joints = joint_names_.size();
-    //   robot has 6 joints and 2 interfaces
+    // どのモーターを使うか関係なくeffort, position, velocity全て用意しておく。
     joint_position_.assign(num_joints, 0);
     joint_velocities_.assign(num_joints, 0);
+    joint_effort_.assign(num_joints, 0);
     joint_position_command_.assign(num_joints, 0);
     joint_velocities_command_.assign(num_joints, 0);
+    joint_effort_command_.assign(num_joints, 0);
 
     return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -39,6 +42,7 @@ std::vector<hardware_interface::StateInterface> M5Hardware::export_state_interfa
         // 位置と速度のインターフェースを追加
         state_interfaces.emplace_back(joint_names_[i], "position", &joint_position_[i]);
         state_interfaces.emplace_back(joint_names_[i], "velocity", &joint_velocities_[i]);
+        state_interfaces.emplace_back(joint_names_[i], "effort", &joint_effort_[i]);
     }
 
     return state_interfaces;
@@ -53,6 +57,7 @@ std::vector<hardware_interface::CommandInterface> M5Hardware::export_command_int
         // 位置と速度のインターフェースを追加
         command_interfaces.emplace_back(joint_names_[i], "position", &joint_position_command_[i]); // joint_position_command_にros2 controlからの値が入る
         command_interfaces.emplace_back(joint_names_[i], "velocity", &joint_velocities_command_[i]);
+        command_interfaces.emplace_back(joint_names_[i], "effort", &joint_effort_command_[i]);
     }
 
     return command_interfaces;
