@@ -4,6 +4,8 @@
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
+#include "m5.hpp"
+#include <memory>
 namespace m5_hardware
 {
     class M5Hardware : public hardware_interface::SystemInterface
@@ -28,6 +30,9 @@ namespace m5_hardware
         std::vector<double> joint_position_command_;  // 関節の位置コマンドを保持する配列
         std::vector<double> joint_velocities_command_;  // 関節の速度コマンドを保持する配列
         std::vector<double> joint_effort_command_;  // 関節の電流コマンドを保持する配列
+        std::unique_ptr<m5link::M5SerialClient> m5_; // M5Stackとの通信クライアント
+        enum class CmdMode { POSITION, EFFORT };
+        std::vector<CmdMode> cmd_mode_;  // ジョイントごとの送信モード
 
     };
 }

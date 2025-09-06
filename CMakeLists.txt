@@ -12,6 +12,7 @@ ament_auto_find_build_dependencies()
 # ライブラリの定義（.so を作成、インストールまで一括）
 ament_auto_add_library(${PROJECT_NAME} SHARED
   src/m5_hardware.cpp
+  src/m5.cpp
 )
 
 # pluginlib のエクスポート（plugin.xml → m5_hardware.xml）

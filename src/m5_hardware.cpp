@@ -29,7 +29,33 @@ hardware_interface::CallbackReturn M5Hardware::on_init(
 hardware_interface::CallbackReturn M5Hardware::on_configure(
     const rclcpp_lifecycle::State & previous_state)
 {
-    // Configure the hardware interface
+    // パラメータ（URDF/ros2_controlのhardware_parameters）から取得する想定
+    std::string port = "/dev/ttyUSB0";
+    int baud = 115200;
+    if (info_.hardware_parameters.count("port")) { port = info_.hardware_parameters.at("port"); }
+    if (info_.hardware_parameters.count("baud")) { baud = std::stoi(info_.hardware_parameters.at("baud")); }
+
+    // モード配列を準備（既定は POSITION）
+    cmd_mode_.assign(joint_names_.size(), CmdMode::POSITION);
+
+    for (size_t i=0;i<info_.joints.size();++i) {
+        bool has_pos=false, has_eff=false;
+        for (const auto &ci : info_.joints[i].command_interfaces) {
+        if (ci.name == "position") has_pos=true;
+        if (ci.name == "effort")   has_eff=true;
+        }
+        if (!info_.hardware_parameters.count("cmd_mode")) {
+        if (has_eff && !has_pos) cmd_mode_[i] = CmdMode::EFFORT;
+        else                     cmd_mode_[i] = CmdMode::POSITION;
+        }
+    }
+
+    // シリアル開始
+    m5_ = std::make_unique<m5link::M5SerialClient>();
+    if (!m5_->start(port, baud, joint_names_.size())) {
+        RCLCPP_ERROR(rclcpp::get_logger("M5Hardware"), "Failed to open %s", port.c_str());
+        return hardware_interface::CallbackReturn::ERROR;
+    }
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -82,13 +108,36 @@ std::vector<hardware_interface::CommandInterface> M5Hardware::export_command_int
 hardware_interface::return_type M5Hardware::read(
     const rclcpp::Time & time, const rclcpp::Duration & period)
 {
-    // TODO : M5Stackから各ジョイントの位置と速度を取得
+    // 非ブロッキングで最新STATEを反映
+    std::vector<double> pos;
+
+    if (m5_ && m5_->tryGetLatestPositions(pos)) {
+        const size_t n = std::min(pos.size(), joint_position_.size());
+        for (size_t i = 0; i < n; ++i) joint_position_[i] = pos[i];
+        // 速度や努力が必要なら、M5側で送る・受ける仕様を拡張して同様に反映
+    }
     return hardware_interface::return_type::OK;
 }
 hardware_interface::return_type M5Hardware::write(
     const rclcpp::Time & time, const rclcpp::Duration & period)
 {
-    // TODO : M5Stackに各ジョイントの位置と速度コマンドを送信
+    // N本の配列を用意（同じ長さ・同じ順序）
+    const size_t N = joint_names_.size();
+    std::vector<double> pos(N, 0.0), eff(N, 0.0);
+
+    for (size_t i=0;i<N;++i) {
+        if (cmd_mode_[i] == CmdMode::POSITION) {
+            pos[i] = joint_position_command_[i]; // position 指令を使用
+            eff[i] = 0.0;                         // 未使用側は0.0（M5で無視）
+        }
+        else {
+            pos[i] = 0.0;
+            eff[i] = joint_effort_command_[i];   // effort 指令を使用
+        }
+    }
+
+    // 1行で原子送信（非同期）
+    if (m5_) m5_->sendSetCommand(pos, eff);
     return hardware_interface::return_type::OK;
 }
 }  // namespace m5_hardware       
