@@ -38,6 +38,7 @@ hardware_interface::CallbackReturn M5Hardware::on_configure(
     // モード配列を準備（既定は POSITION）
     cmd_mode_.assign(joint_names_.size(), CmdMode::POSITION);
 
+    // コマンドインターフェースから送信モードを決定
     for (size_t i=0;i<info_.joints.size();++i) {
         bool has_pos=false, has_eff=false;
         for (const auto &ci : info_.joints[i].command_interfaces) {
@@ -50,6 +51,19 @@ hardware_interface::CallbackReturn M5Hardware::on_configure(
         }
     }
 
+    // 状態保持用配列の準備(state interfaceが指定されているかどうか)
+    const size_t N = info_.joints.size();
+    has_state_pos_.assign(N, false);
+    has_state_vel_.assign(N, false);
+    has_state_eff_.assign(N, false);
+
+    for (size_t i = 0; i < N; ++i) {
+        for (const auto &si : info_.joints[i].state_interfaces) {
+            if (si.name == "position") has_state_pos_[i] = true;
+            else if (si.name == "velocity") has_state_vel_[i] = true;
+            else if (si.name == "effort")   has_state_eff_[i] = true;
+        }
+    }
     // シリアル開始
     m5_ = std::make_unique<m5link::M5SerialClient>();
     if (!m5_->start(port, baud, joint_names_.size())) {
@@ -108,14 +122,50 @@ std::vector<hardware_interface::CommandInterface> M5Hardware::export_command_int
 hardware_interface::return_type M5Hardware::read(
     const rclcpp::Time & time, const rclcpp::Duration & period)
 {
-    // 非ブロッキングで最新STATEを反映
-    std::vector<double> pos;
-
-    if (m5_ && m5_->tryGetLatestPositions(pos)) {
-        const size_t n = std::min(pos.size(), joint_position_.size());
-        for (size_t i = 0; i < n; ++i) joint_position_[i] = pos[i];
-        // 速度や努力が必要なら、M5側で送る・受ける仕様を拡張して同様に反映
+    if (!m5_) {
+        return hardware_interface::return_type::OK;
     }
+
+    m5link::JointStateSnapshot snap;
+    if (!m5_->tryGetLatestState(snap)) {
+        // 新しい状態がまだ無い／更新なし
+        return hardware_interface::return_type::OK;
+    }
+
+    const size_t N = joint_names_.size();
+
+    // position
+    if (!snap.position.empty()) {
+        const size_t n = std::min(N, snap.position.size());
+        for (size_t i = 0; i < n; ++i) {
+        if (i < has_state_pos_.size() && !has_state_pos_[i]) continue;
+        joint_position_[i] = snap.position[i];
+        }
+    }
+
+    // velocity
+    if (!snap.velocity.empty()) {
+        const size_t n = std::min(N, snap.velocity.size());
+        for (size_t i = 0; i < n; ++i) {
+        if (i < has_state_vel_.size() && !has_state_vel_[i]) continue;
+        joint_velocities_[i] = snap.velocity[i];
+        }
+    }
+
+    // effort
+    if (!snap.effort.empty()) {
+        const size_t n = std::min(N, snap.effort.size());
+        for (size_t i = 0; i < n; ++i) {
+        if (i < has_state_eff_.size() && !has_state_eff_[i]) continue;
+        joint_effort_[i] = snap.effort[i];
+        }
+    }
+
+    RCLCPP_DEBUG(
+        rclcpp::get_logger("M5Hardware"),
+        "M5 latest state: pos=%zu vel=%zu eff=%zu",
+        snap.position.size(), snap.velocity.size(), snap.effort.size());
+
     return hardware_interface::return_type::OK;
 }
 hardware_interface::return_type M5Hardware::write(
@@ -136,7 +186,6 @@ hardware_interface::return_type M5Hardware::write(
         }
     }
 
-    // 1行で原子送信（非同期）
     if (m5_) m5_->sendSetCommand(pos, eff);
     return hardware_interface::return_type::OK;
 }

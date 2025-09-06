@@ -4,7 +4,7 @@
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
-#include "m5.hpp"
+#include "m5_hardware/m5.hpp"
 #include <memory>
 namespace m5_hardware
 {
@@ -33,6 +33,9 @@ namespace m5_hardware
         std::unique_ptr<m5link::M5SerialClient> m5_; // M5Stackとの通信クライアント
         enum class CmdMode { POSITION, EFFORT };
         std::vector<CmdMode> cmd_mode_;  // ジョイントごとの送信モード
+        std::vector<bool> has_state_pos_;
+        std::vector<bool> has_state_vel_;
+        std::vector<bool> has_state_eff_;
 
     };
 }

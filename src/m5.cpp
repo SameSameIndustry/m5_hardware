@@ -1,4 +1,4 @@
-#include "m5.hpp"
+#include "m5_hardware/m5.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -9,6 +9,7 @@
 #include <sys/select.h>
 #include <sstream>
 #include <iomanip>
+#include <locale>
 
 namespace m5link {
 
@@ -56,59 +57,25 @@ void M5SerialClient::stop() {
   if (!running_) return;
   stop_flag_ = true;
 
-  // TX待ちを起こす
   { std::lock_guard<std::mutex> lk(tx_mtx_); }
   tx_cv_.notify_all();
 
-  // ファイルディスクリプタを閉じるとrx select()が解除される
   closeSerial();
 
   if (rx_thread_.joinable()) rx_thread_.join();
   if (tx_thread_.joinable()) tx_thread_.join();
-
   running_ = false;
 }
 
 void M5SerialClient::sendSetPosition(const std::vector<double>& positions) {
   if (!running_) return;
-
-  // CSV 生成（固定小数点、'.'使用）
-  std::ostringstream oss;
-  oss.imbue(std::locale::classic());               // 小数点を'.'に固定
-  oss << "SET_POS," << positions.size();
-  oss << std::fixed << std::setprecision(6);
-  for (double v : positions) {
-    oss << "," << v;
-  }
-  oss << "\n";
-  const std::string msg = oss.str();
-
-  // キュー投入（即return）
-  {
-    std::lock_guard<std::mutex> lk(tx_mtx_);
-    tx_queue_.push_back(msg);
-  }
-  tx_cv_.notify_one();
-}
-
-void m5link::M5SerialClient::sendSetCommand(const std::vector<double>& positions,
-                                            const std::vector<double>& efforts) {
-  if (!running_) return;
-  const size_t n = std::min(positions.size(), efforts.size());
-
   std::ostringstream oss;
   oss.imbue(std::locale::classic());
-  oss << "SET_CMD," << n << std::fixed << std::setprecision(6);
-
-  // まず position ベクトル N 個
-  for (size_t i = 0; i < n; ++i) oss << "," << positions[i];
-
-  // 続いて effort ベクトル N 個
-  for (size_t i = 0; i < n; ++i) oss << "," << efforts[i];
-
+  oss << "SET_POS," << positions.size()
+      << std::fixed << std::setprecision(6);
+  for (double v : positions) oss << "," << v;
   oss << "\n";
   const std::string msg = oss.str();
-
   {
     std::lock_guard<std::mutex> lk(tx_mtx_);
     tx_queue_.push_back(msg);
@@ -116,11 +83,43 @@ void m5link::M5SerialClient::sendSetCommand(const std::vector<double>& positions
   tx_cv_.notify_one();
 }
 
-bool M5SerialClient::tryGetLatestPositions(std::vector<double>& positions, std::chrono::steady_clock::time_point* stamp) {
+void M5SerialClient::sendSetCommand(const std::vector<double>& positions,
+                                    const std::vector<double>& efforts) {
+  if (!running_) return;
+  const size_t n = std::min(positions.size(), efforts.size());
+  std::ostringstream oss;
+  oss.imbue(std::locale::classic());
+  oss << "SET_CMD," << n
+      << std::fixed << std::setprecision(6);
+  for (size_t i=0;i<n;++i) oss << "," << positions[i];
+  for (size_t i=0;i<n;++i) oss << "," << efforts[i];
+  oss << "\n";
+
+  const std::string msg = oss.str();
+  {
+    std::lock_guard<std::mutex> lk(tx_mtx_);
+    tx_queue_.push_back(msg);
+  }
+  tx_cv_.notify_one();
+}
+
+bool M5SerialClient::tryGetLatestPositions(std::vector<double>& positions,
+                                           std::chrono::steady_clock::time_point* stamp) {
   std::lock_guard<std::mutex> lk(state_mtx_);
   if (latest_pos_.empty()) return false;
   positions = latest_pos_;
   if (stamp) *stamp = latest_stamp_;
+  return true;
+}
+
+bool M5SerialClient::tryGetLatestState(JointStateSnapshot& out) {
+  std::lock_guard<std::mutex> lk(state_mtx_);
+  bool any = !latest_pos_.empty() || !latest_vel_.empty() || !latest_eff_.empty();
+  if (!any) return false;
+  out.position = latest_pos_;
+  out.velocity = latest_vel_;
+  out.effort   = latest_eff_;
+  out.stamp    = latest_stamp_;
   return true;
 }
 
@@ -153,16 +152,13 @@ int M5SerialClient::openSerial(const std::string& dev, int baudrate) {
     return -1;
   }
 
-  // 8N1 / フロー制御OFF
   tio.c_cflag |= (CLOCAL | CREAD);
   tio.c_cflag &= ~PARENB;
   tio.c_cflag &= ~CSTOPB;
   tio.c_cflag &= ~CSIZE;
   tio.c_cflag |= CS8;
-  tio.c_cflag &= ~CRTSCTS;                // HW flow off
-  tio.c_iflag &= ~(IXON | IXOFF | IXANY); // SW flow off
-
-  // 非ブロッキングreadはselectで見るのでVMIN/VTIMEは0
+  tio.c_cflag &= ~CRTSCTS;
+  tio.c_iflag &= ~(IXON | IXOFF | IXANY);
   tio.c_cc[VMIN]  = 0;
   tio.c_cc[VTIME] = 0;
 
@@ -172,7 +168,6 @@ int M5SerialClient::openSerial(const std::string& dev, int baudrate) {
     return -1;
   }
 
-  // オープン直後のゴミを捨てる
   tcflush(fd, TCIOFLUSH);
   return fd;
 }
@@ -186,19 +181,15 @@ void M5SerialClient::closeSerial() {
 
 // ---- スレッド ----
 void M5SerialClient::rxLoop() {
-  std::string line;
-  line.reserve(256);
+  std::string line; line.reserve(256);
   char buf[256];
 
   while (!stop_flag_) {
     if (fd_ < 0) break;
-
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(fd_, &rfds);
-    timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 200000; // 200ms刻みで停止フラグ確認
+    timeval tv{0, 200000}; // 200ms
 
     int r = ::select(fd_ + 1, &rfds, nullptr, nullptr, &tv);
     if (r < 0) {
@@ -206,7 +197,7 @@ void M5SerialClient::rxLoop() {
       std::fprintf(stderr, "[M5] select(rx) error: %s\n", std::strerror(errno));
       break;
     }
-    if (r == 0) continue; // timeout: stopフラグ確認ループ
+    if (r == 0) continue;
 
     ssize_t n = ::read(fd_, buf, sizeof(buf));
     if (n < 0) {
@@ -214,21 +205,17 @@ void M5SerialClient::rxLoop() {
       std::fprintf(stderr, "[M5] read error: %s\n", std::strerror(errno));
       break;
     }
-    if (n == 0) {
-      // 相手切断の可能性
-      continue;
-    }
+    if (n == 0) continue;
 
-    for (ssize_t i = 0; i < n; ++i) {
+    for (ssize_t i=0;i<n;++i) {
       char c = buf[i];
       if (c == '\n') {
-        // 完成行（末尾CR除去）
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty()) handleLine(line);
         line.clear();
       } else {
-        if (line.size() < 1024) line.push_back(c);
-        else line.clear(); // 異常な長さは破棄
+        if (line.size() < 2048) line.push_back(c);
+        else line.clear();
       }
     }
   }
@@ -246,7 +233,6 @@ void M5SerialClient::txLoop() {
     }
     if (fd_ < 0) continue;
 
-    // write_all
     const char* p = msg.data();
     size_t left = msg.size();
     while (left > 0 && !stop_flag_) {
@@ -259,51 +245,112 @@ void M5SerialClient::txLoop() {
       left -= (size_t)n;
       p    += (size_t)n;
     }
-    // 送信完了待ち（短い行なのでOK。長大行なら省略可）
     if (fd_ >= 0) ::tcdrain(fd_);
   }
 }
 
 // ---- パース ----
-// 受信行の解釈（最小：STATE,N,rad...）
 void M5SerialClient::handleLine(const std::string& line) {
   std::vector<std::string> tok;
   if (!splitCSV(line, tok) || tok.empty()) return;
 
+  auto now = std::chrono::steady_clock::now();
+
+  auto parseNvals = [&](size_t start, unsigned N, std::vector<double>& out)->bool {
+    if (tok.size() != start + N) return false;
+    std::vector<double> tmp; tmp.reserve(N);
+    for (unsigned i=0;i<N;++i) {
+      double v;
+      if (!parseDouble(tok[start + i], v)) return false;
+      tmp.push_back(v);
+    }
+    out.swap(tmp);
+    return true;
+  };
+
   if (tok[0] == "STATE") {
     if (tok.size() < 2) return;
-    unsigned N = 0;
-    if (!parseUint(tok[1], N)) return;
-    if (tok.size() != 2 + N) return;
-
+    unsigned N=0; if (!parseUint(tok[1], N)) return;
     std::vector<double> pos;
-    pos.reserve(N);
-    for (unsigned i = 0; i < N; ++i) {
-      double v;
-      if (!parseDouble(tok[2 + i], v)) return;
-      pos.push_back(v);
-    }
-
-    {
-      std::lock_guard<std::mutex> lk(state_mtx_);
+    if (!parseNvals(2, N, pos)) return;
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    if (expected_joints_ == 0 || pos.size() == expected_joints_) {
       latest_pos_.swap(pos);
-      latest_stamp_ = std::chrono::steady_clock::now();
+      latest_stamp_ = now;
     }
+    return;
   }
-  // 必要なら "VEL", "EFF" の行も追加実装可能
+
+  if (tok[0] == "STATE_VEL") {
+    if (tok.size() < 2) return;
+    unsigned N=0; if (!parseUint(tok[1], N)) return;
+    std::vector<double> vel;
+    if (!parseNvals(2, N, vel)) return;
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    if (expected_joints_ == 0 || vel.size() == expected_joints_) {
+      latest_vel_.swap(vel);
+      latest_stamp_ = now;
+    }
+    return;
+  }
+
+  if (tok[0] == "STATE_EFF") {
+    if (tok.size() < 2) return;
+    unsigned N=0; if (!parseUint(tok[1], N)) return;
+    std::vector<double> eff;
+    if (!parseNvals(2, N, eff)) return;
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    if (expected_joints_ == 0 || eff.size() == expected_joints_) {
+      latest_eff_.swap(eff);
+      latest_stamp_ = now;
+    }
+    return;
+  }
+
+  if (tok[0] == "STATE2") {
+    if (tok.size() < 2) return;
+    unsigned N=0; if (!parseUint(tok[1], N)) return;
+    if (tok.size() != 2 + N + N) return;
+    std::vector<double> pos, eff;
+    // pos: [2 .. 2+N-1], eff: [2+N .. 2+2N-1]
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+i], v)) return; pos.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; eff.push_back(v); }
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    if (expected_joints_ == 0 || (pos.size()==expected_joints_ && eff.size()==expected_joints_)) {
+      latest_pos_.swap(pos);
+      latest_eff_.swap(eff);
+      latest_stamp_ = now;
+    }
+    return;
+  }
+
+  if (tok[0] == "STATE_FULL") {
+    if (tok.size() < 2) return;
+    unsigned N=0; if (!parseUint(tok[1], N)) return;
+    if (tok.size() != 2 + N + N + N) return;
+    std::vector<double> pos, vel, eff;
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+i], v)) return; pos.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; vel.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+2*N+i], v)) return; eff.push_back(v); }
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    if (expected_joints_ == 0 || (pos.size()==expected_joints_ && vel.size()==expected_joints_ && eff.size()==expected_joints_)) {
+      latest_pos_.swap(pos);
+      latest_vel_.swap(vel);
+      latest_eff_.swap(eff);
+      latest_stamp_ = now;
+    }
+    return;
+  }
+
+  // 他の行は無視
 }
 
-// カンマ区切り分割（単純版）
 bool M5SerialClient::splitCSV(const std::string& s, std::vector<std::string>& out) {
   out.clear();
   std::string cur;
   for (char c : s) {
-    if (c == ',') {
-      out.emplace_back(std::move(cur));
-      cur.clear();
-    } else {
-      cur.push_back(c);
-    }
+    if (c == ',') { out.emplace_back(std::move(cur)); cur.clear(); }
+    else          { cur.push_back(c); }
   }
   out.emplace_back(std::move(cur));
   return true;
@@ -319,7 +366,6 @@ bool M5SerialClient::parseUint(const std::string& s, unsigned& v) {
 }
 
 bool M5SerialClient::parseDouble(const std::string& s, double& v) {
-  // ロケール非依存（classic）で '.' 小数点想定
   char* end = nullptr;
   errno = 0;
   v = std::strtod(s.c_str(), &end);
