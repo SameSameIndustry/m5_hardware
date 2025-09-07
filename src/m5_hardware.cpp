@@ -161,11 +161,6 @@ hardware_interface::return_type M5Hardware::read(
         }
     }
 
-    RCLCPP_DEBUG(
-        rclcpp::get_logger("M5Hardware"),
-        "M5 latest state: pos=%zu vel=%zu eff=%zu",
-        snap.position.size(), snap.velocity.size(), snap.effort.size());
-
     return hardware_interface::return_type::OK;
 }
 hardware_interface::return_type M5Hardware::write(
