@@ -10,6 +10,7 @@
 #include <sstream>
 #include <iomanip>
 #include <locale>
+#include <iostream>
 
 namespace m5link {
 
@@ -89,8 +90,7 @@ void M5SerialClient::sendSetCommand(const std::vector<double>& positions,
   const size_t n = std::min(positions.size(), efforts.size());
   std::ostringstream oss;
   oss.imbue(std::locale::classic());
-  oss << "SET_CMD," << n
-      << std::fixed << std::setprecision(6);
+  oss << "SET_CMD" << std::fixed << std::setprecision(6);
   for (size_t i=0;i<n;++i) oss << "," << positions[i];
   for (size_t i=0;i<n;++i) oss << "," << efforts[i];
   oss << "\n";
