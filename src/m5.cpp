@@ -307,18 +307,19 @@ void M5SerialClient::handleLine(const std::string& line) {
     return;
   }
 
+  // STATE2: 位置 + 速度
   if (tok[0] == "STATE2") {
     if (tok.size() < 2) return;
     unsigned N=0; if (!parseUint(tok[1], N)) return;
     if (tok.size() != 2 + N + N) return;
-    std::vector<double> pos, eff;
-    // pos: [2 .. 2+N-1], eff: [2+N .. 2+2N-1]
+  std::vector<double> pos, vel;
+  // pos: [2 .. 2+N-1], vel: [2+N .. 2+2N-1]
     for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+i], v)) return; pos.push_back(v); }
-    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; eff.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; vel.push_back(v); }
     std::lock_guard<std::mutex> lk(state_mtx_);
-    if (expected_joints_ == 0 || (pos.size()==expected_joints_ && eff.size()==expected_joints_)) {
+    if (expected_joints_ == 0 || (pos.size()==expected_joints_ && vel.size()==expected_joints_)) {
       latest_pos_.swap(pos);
-      latest_eff_.swap(eff);
+      latest_vel_.swap(vel);
       latest_stamp_ = now;
     }
     return;

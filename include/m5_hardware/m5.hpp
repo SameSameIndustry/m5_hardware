@@ -24,7 +24,7 @@ struct JointStateSnapshot {
 //   STATE,N,p0,...,pN-1
 //   STATE_VEL,N,v0,...,vN-1
 //   STATE_EFF,N,e0,...,eN-1
-//   STATE2,N,p0,...,pN-1,e0,...,eN-1
+//   STATE2,N,p0,...,pN-1,v0,...,vN-1  // STATE2 は position + velocity
 //   STATE_FULL,N,p...,v...,e...
 class M5SerialClient {
 public:

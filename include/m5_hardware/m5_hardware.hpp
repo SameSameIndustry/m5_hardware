@@ -25,7 +25,7 @@ namespace m5_hardware
     private:
         std::vector<std::string> joint_names_;  // ジョイント名のリスト
         std::vector<double> joint_position_;  // 関節の位置を保持する配列
-        std::vector<double> joint_velocities_;  // 関節の速度を保持する配列
+    std::vector<double> joint_velocities_;  // 関節の速度を保持する配列（STATE2/STATE_VEL で更新）
         std::vector<double> joint_effort_;  // 関節の電流を保持する配列
         std::vector<double> joint_position_command_;  // 関節の位置コマンドを保持する配列
         std::vector<double> joint_velocities_command_;  // 関節の速度コマンドを保持する配列
