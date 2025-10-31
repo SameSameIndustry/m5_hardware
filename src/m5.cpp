@@ -335,8 +335,8 @@ void M5SerialClient::handleLine(const std::string& line) {
     if (tok.size() != 2 + N + N + N) return;
     std::vector<double> pos, vel, eff;
     for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+i], v)) return; pos.push_back(v); }
-    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+2*N+i], v)) return; eff.push_back(v); }
-    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; vel.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; eff.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+2*N+i], v)) return; vel.push_back(v); }
     std::lock_guard<std::mutex> lk(state_mtx_);
     if (expected_joints_ == 0 || (pos.size()==expected_joints_ && vel.size()==expected_joints_ && eff.size()==expected_joints_)) {
       latest_pos_.swap(pos);
