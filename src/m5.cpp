@@ -85,14 +85,17 @@ void M5SerialClient::sendSetPosition(const std::vector<double>& positions) {
 }
 
 void M5SerialClient::sendSetCommand(const std::vector<double>& positions,
-                                    const std::vector<double>& efforts) {
+                                    const std::vector<double>& efforts,
+                                    const std::vector<double>& velocities) {
   if (!running_) return;
-  const size_t n = std::min(positions.size(), efforts.size());
+  const size_t n_tmp = std::min(positions.size(), efforts.size());
+  const size_t n = std::min(n_tmp, velocities.size());
   std::ostringstream oss;
   oss.imbue(std::locale::classic());
   oss << "SET_CMD" << std::fixed << std::setprecision(6);
   for (size_t i=0;i<n;++i) oss << "," << positions[i];
   for (size_t i=0;i<n;++i) oss << "," << efforts[i];
+  for (size_t i=0;i<n;++i) oss << "," << velocities[i];
   oss << "\n";
 
   const std::string msg = oss.str();
@@ -325,19 +328,20 @@ void M5SerialClient::handleLine(const std::string& line) {
     return;
   }
 
+  // 順序は: position, effort, velocity
   if (tok[0] == "STATE_FULL") {
     if (tok.size() < 2) return;
     unsigned N=0; if (!parseUint(tok[1], N)) return;
     if (tok.size() != 2 + N + N + N) return;
     std::vector<double> pos, vel, eff;
     for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+i], v)) return; pos.push_back(v); }
-    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; vel.push_back(v); }
     for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+2*N+i], v)) return; eff.push_back(v); }
+    for (unsigned i=0;i<N;++i) { double v; if (!parseDouble(tok[2+N+i], v)) return; vel.push_back(v); }
     std::lock_guard<std::mutex> lk(state_mtx_);
     if (expected_joints_ == 0 || (pos.size()==expected_joints_ && vel.size()==expected_joints_ && eff.size()==expected_joints_)) {
       latest_pos_.swap(pos);
-      latest_vel_.swap(vel);
       latest_eff_.swap(eff);
+      latest_vel_.swap(vel);
       latest_stamp_ = now;
     }
     return;
