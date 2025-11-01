@@ -85,22 +85,24 @@ void M5SerialClient::sendSetPosition(const std::vector<double>& positions) {
 }
 
 void M5SerialClient::sendSetCommand(const std::vector<double>& positions,
-                                    const std::vector<double>& efforts,
-                                    const std::vector<double>& velocities) {
+                                    const std::vector<double>& efforts
+                                    // const std::vector<double>& velocities
+                                  ) {
   if (!running_) return;
-  const size_t n_tmp = std::min(positions.size(), efforts.size());
-  const size_t n = std::min(n_tmp, velocities.size());
+  const size_t n = std::min(positions.size(), efforts.size());
+  // const size_t n = std::min(n_tmp, velocities.size());
   std::ostringstream oss;
   oss.imbue(std::locale::classic());
   oss << "SET_CMD" << std::fixed << std::setprecision(6);
   for (size_t i=0;i<n;++i) oss << "," << positions[i];
   for (size_t i=0;i<n;++i) oss << "," << efforts[i];
-  for (size_t i=0;i<n;++i) oss << "," << velocities[i];
+  // for (size_t i=0;i<n;++i) oss << "," << velocities[i];
   oss << "\n";
 
   const std::string msg = oss.str();
   {
     std::lock_guard<std::mutex> lk(tx_mtx_);
+    std::cout << oss.str() << std::endl;
     tx_queue_.push_back(msg);
   }
   tx_cv_.notify_one();

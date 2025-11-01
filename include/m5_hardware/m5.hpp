@@ -39,8 +39,7 @@ public:
   void sendSetPosition(const std::vector<double>& positions);
   // 送信：位置＋努力（原子更新）
   void sendSetCommand(const std::vector<double>& positions,
-                      const std::vector<double>& efforts,
-                      const std::vector<double>& velocities);
+                      const std::vector<double>& efforts);
 
   // 取得：最新の位置のみ（後方互換）
   bool tryGetLatestPositions(std::vector<double>& positions,

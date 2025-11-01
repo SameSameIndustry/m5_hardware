@@ -190,7 +190,7 @@ hardware_interface::return_type M5Hardware::write(
         }
     }
 
-    if (m5_) m5_->sendSetCommand(pos, eff, vel);
+    if (m5_) m5_->sendSetCommand(pos, eff);
     return hardware_interface::return_type::OK;
 }
 }  // namespace m5_hardware       
